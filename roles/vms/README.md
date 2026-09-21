@@ -21,7 +21,7 @@ vms_ns_servers:
   - 8.8.8.8
   - 1.1.1.1
 
-vms_image: /var/lib/libvirt/images/rocky-9_7_generic_cloud.qcow2
+vms_image: /var/lib/libvirt/images/rocky-9_8_generic_cloud.qcow2
 vms_domain: example.com
 
 vms_authorized_keys:
