@@ -1,0 +1,92 @@
+---
+- name: Check the base image before writing artifacts
+  ansible.builtin.stat:
+    path: '{{ vms_image }}'
+    follow: false
+  register: __managed_image
+
+- name: Require a regular administrator-owned base image
+  ansible.builtin.assert:
+    that:
+      - __managed_image.stat.isreg | default(false)
+      - __managed_image.stat.uid == 0
+      - not (__managed_image.stat.islnk | default(false))
+
+- name: Create the reserved disk directory
+  ansible.builtin.file:
+    path: '{{ vms[0].directory }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0711'
+
+- name: Write managed cloud-init documents
+  ansible.builtin.copy:
+    content: '{{ item.content }}'
+    dest: '{{ vms[0].directory }}/{{ item.name }}'
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  loop:
+    - name: user-data
+      content: '{{ vms[0].user_data }}'
+    - name: meta-data
+      content: '{{ vms[0].meta_data }}'
+    - name: network-config
+      content: '{{ vms[0].network_config }}'
+
+- name: Copy the trusted base into a standalone managed disk
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/qemu-img
+      - convert
+      - -f
+      - qcow2
+      - -O
+      - qcow2
+      - '{{ vms_image }}'
+      - '{{ vms[0].directory }}/disk.qcow2'
+    creates: '{{ vms[0].directory }}/disk.qcow2'
+
+- name: Set the managed virtual disk capacity
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/qemu-img
+      - resize
+      - '{{ vms[0].directory }}/disk.qcow2'
+      - '{{ vms[0].disk_gib }}G'
+  changed_when: true
+
+- name: Create the managed NoCloud seed
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/genisoimage
+      - -output
+      - '{{ vms[0].directory }}/seed.iso'
+      - -volid
+      - cidata
+      - -joliet
+      - -rock
+      - '{{ vms[0].directory }}/user-data'
+      - '{{ vms[0].directory }}/meta-data'
+      - '{{ vms[0].directory }}/network-config'
+    creates: '{{ vms[0].directory }}/seed.iso'
+
+- name: Restore SELinux contexts for managed artifacts
+  ansible.builtin.command:
+    argv: [/usr/sbin/restorecon, -RF, '{{ vms[0].directory }}']
+  changed_when: false
+
+- name: Define and start the reserved domain
+  ansible.builtin.command:
+    argv: >-
+      {{ ['/usr/bin/virt-install', '--connect', vms_libvirt_uri,
+          '--name', vms[0].name, '--uuid', vms[0].uuid,
+          '--memory', vms[0].memory_mib | string, '--vcpus', vms[0].vcpus | string,
+          '--cputune', 'global_period=100000,global_quota=' ~ ((vms[0].vcpus | int) * 100000),
+          '--disk', 'path=' ~ vms[0].directory ~ '/disk.qcow2,format=qcow2,bus=virtio',
+          '--disk', 'path=' ~ vms[0].directory ~ '/seed.iso,device=cdrom',
+          '--os-variant', vms[0].os_variant, '--import', '--graphics', 'none',
+          '--noautoconsole'] + vms[0].network_arguments }}
+  changed_when: true

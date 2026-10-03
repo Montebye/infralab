@@ -1,17 +1,25 @@
 ---
-- name: Get all VMS on the hypervisor
-  command:
-    cmd: "virsh list --all --name"
-  register: __vms_virsh_list
-  changed_when: false
+- name: Run managed self-service operations
+  ansible.builtin.include_tasks: managed.yml
+  when: vms_managed_mode | bool
 
-- name: Extract all VM list from virsh command output
-  set_fact:
-    __vms_on_node: "{{ __vms_virsh_list.stdout_lines | list }}"
-
-- ansible.builtin.import_tasks: cloudinit.yml
-- ansible.builtin.import_tasks: image.yml
-- ansible.builtin.import_tasks: disk.yml
-- ansible.builtin.import_tasks: vms.yml
-
-
+- name: Run existing administrative workflow
+  when: not (vms_managed_mode | bool)
+  block:
+    - name: Get all VMS on the hypervisor
+      ansible.builtin.command:
+        argv: [/usr/bin/virsh, -c, "{{ vms_libvirt_uri }}", list, --all, --name]
+      register: __vms_virsh_list
+      changed_when: false
+    - name: Extract all VM list from virsh command output
+      ansible.builtin.set_fact:
+        __vms_on_node: "{{ __vms_virsh_list.stdout_lines | list }}"
+    - name: Validate source image before creating artifacts
+      ansible.builtin.import_tasks: image.yml
+      when: vms | selectattr("state", "defined") | selectattr("state", "equalto", "present") | rejectattr("name", "in", __vms_on_node) | list | length > 0
+    - name: Prepare administrative cloud-init
+      ansible.builtin.import_tasks: cloudinit.yml
+    - name: Prepare administrative disks
+      ansible.builtin.import_tasks: disk.yml
+    - name: Apply administrative domains
+      ansible.builtin.import_tasks: vms.yml

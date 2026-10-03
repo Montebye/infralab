@@ -89,3 +89,18 @@ Author Information
 ------------------
 
 An optional section for the role authors to include contact information, or a website (HTML is not allowed).
+
+## Managed self-service mode
+
+`vms_managed_mode: true` selects the executor-only task path. It requires exactly
+one validated VM, its reserved UUID, a server-generated name and the directory
+`/var/lib/libvirt/images/selfservice/<uuid>`. The URI is `qemu:///system`.
+The self-service executor supplies cloud-init documents, resource sizes and bridge
+arguments from its administrative policy. These variables are an internal contract,
+not a safe interface for arbitrary user-provided Ansible variables.
+
+Creation copies a trusted standalone qcow2 base into a standalone disk before
+resizing, so libvirt does not change ownership of a shared catalog backing file.
+Deletion verifies the domain UUID and skips `destroy` for a shut-off VM. It never
+uses `--remove-all-storage`; the executor verifies and removes its registered files.
+The default `vms_managed_mode: false` preserves the existing administrative path.

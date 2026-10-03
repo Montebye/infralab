@@ -1,4 +1,20 @@
 ---
+- name: Check whether self-service owns persistent firewall rules
+  ansible.builtin.stat:
+    path: /etc/infralab-selfservice/policy.json
+  register: __firewalld_selfservice_policy
+  when: firewalld_unmanaged_objects_clean | bool
+
+- name: Refuse global cleanup when self-service ownership exists
+  ansible.builtin.assert:
+    that:
+      - not __firewalld_selfservice_policy.stat.exists
+    fail_msg: >-
+      Global firewall cleanup cannot preserve dynamically registered self-service
+      rules. Disable firewalld_unmanaged_objects_clean and remove only explicitly
+      reviewed administrative objects; disabling admission does not release ownership.
+  when: firewalld_unmanaged_objects_clean | bool
+
 - name: Get firewalld configuration
   ansible.posix.firewalld_info:
     active_zones: true

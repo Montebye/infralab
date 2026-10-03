@@ -1,0 +1,26 @@
+---
+- name: Initialize administrative network arguments
+  ansible.builtin.set_fact:
+    __vms_network_arguments: []
+
+- name: Build administrative network arguments
+  ansible.builtin.set_fact:
+    __vms_network_arguments: '{{ __vms_network_arguments + ["--network", "bridge=" ~ network.bridge ~ ",model=virtio"] }}'
+  loop: '{{ item.networks }}'
+  loop_control:
+    loop_var: network
+    label: '{{ network.bridge }}'
+
+- name: Define and start administrative domain
+  ansible.builtin.command:
+    argv: >-
+      {{ ['/usr/bin/virt-install', '--connect', vms_libvirt_uri,
+          '--name', item.name, '--memory', item.memory | string,
+          '--vcpus', item.vcpu | string,
+          '--disk', 'path=' ~ item.disk.path ~ '/' ~ item.name ~ '.qcow2,format=qcow2',
+          '--os-variant', item['os-variant'], '--import',
+          '--graphics', 'vnc,listen=127.0.0.1', '--noautoconsole', '--autostart',
+          '--cloud-init', 'user-data=' ~ item.disk.path ~ '/' ~ item.name ~ '-user-data,meta-data=' ~
+          item.disk.path ~ '/' ~ item.name ~ '-meta-data,network-config=' ~
+          item.disk.path ~ '/' ~ item.name ~ '-network-config'] + __vms_network_arguments }}
+  changed_when: true

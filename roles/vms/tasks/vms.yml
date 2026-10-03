@@ -1,30 +1,50 @@
 ---
-- name: Delete VMs
-  shell: |
-    virsh destroy  --domain  {{ item['name'] }}
-    virsh undefine --domain {{ item['name'] }} --remove-all-storage
+- name: Inspect power state before administrative deletion
+  ansible.builtin.command:
+    argv: [/usr/bin/virsh, -c, '{{ vms_libvirt_uri }}', domstate, --domain, '{{ item.name }}']
+  register: __vms_delete_states
+  changed_when: false
   when:
-    - item['state'] is defined and item['state'] == "absent"
-    - item['name'] in __vms_on_node
-  loop: "{{ vms }}"
+    - item.state | default('') == 'absent'
+    - item.name in __vms_on_node
+  loop: '{{ vms }}'
+  loop_control:
+    label: '{{ item.name }}'
 
-- name: Create VMs
-  command: >
-    virt-install
-    --name {{ item.name }}
-    --memory {{ item.memory }}
-    --vcpus {{ item.vcpu }}
-    --disk path={{ item.disk.path }}/{{ item.name }}.qcow2,format=qcow2
-    --os-variant {{ item['os-variant'] }}
-    --import
-    --graphics vnc,listen=127.0.0.1
-    --noautoconsole
-    --autostart
-    {% for net in item.networks %}
-    --network bridge={{ net.bridge }},model=virtio
-    {% endfor %}
-    --cloud-init user-data={{ item.disk.path }}/{{ item.name }}-user-data,meta-data={{ item.disk.path }}/{{ item.name }}-meta-data,network-config={{ item.disk.path }}/{{ item.name }}-network-config
-  when: 
-    - item['name'] not in __vms_on_node
-    - item['state'] is defined and item['state'] == "present"
-  loop: "{{ vms }}"
+- name: Require a supported administrative deletion state
+  ansible.builtin.assert:
+    that: item.stdout | trim in ['running', 'shut off']
+    fail_msg: 'Cannot delete {{ item.item.name }} with power state {{ item.stdout | trim }}'
+  when: not (item.skipped | default(false))
+  loop: '{{ __vms_delete_states.results }}'
+  loop_control:
+    label: '{{ item.item.name }}'
+
+- name: Stop running administrative domains before deletion
+  ansible.builtin.command:
+    argv: [/usr/bin/virsh, -c, '{{ vms_libvirt_uri }}', destroy, --domain, '{{ item.item.name }}']
+  changed_when: true
+  when:
+    - not (item.skipped | default(false))
+    - item.stdout | trim == 'running'
+  loop: '{{ __vms_delete_states.results }}'
+  loop_control:
+    label: '{{ item.item.name }}'
+
+- name: Delete administrative domains and their storage
+  ansible.builtin.command:
+    argv: [/usr/bin/virsh, -c, '{{ vms_libvirt_uri }}', undefine, --domain, '{{ item.item.name }}', --remove-all-storage]
+  changed_when: true
+  when: not (item.skipped | default(false))
+  loop: '{{ __vms_delete_states.results }}'
+  loop_control:
+    label: '{{ item.item.name }}'
+
+- name: Create missing administrative domains
+  ansible.builtin.include_tasks: administrative_present.yml
+  when:
+    - item.state | default('') == 'present'
+    - item.name not in __vms_on_node
+  loop: '{{ vms }}'
+  loop_control:
+    label: '{{ item.name }}'

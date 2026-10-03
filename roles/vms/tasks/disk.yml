@@ -1,8 +1,7 @@
 ---
 - name: Create virtual disk
-  command:
-    cmd: "qemu-img create -b {{ vms_image }} -f qcow2 -F qcow2 {{ item['disk']['path'] }}/{{ item['name'] }}.qcow2 {{ item['disk']['size'] ~ 'G' }}"
-  args:
+  ansible.builtin.command:
+    argv: [/usr/bin/qemu-img, create, -b, "{{ vms_image }}", -f, qcow2, -F, qcow2, "{{ item.disk.path }}/{{ item.name }}.qcow2", "{{ item.disk.size }}G"]
     creates: "{{ item['disk']['path'] }}/{{ item['name'] }}.qcow2"
   when:
     - item['name'] not in __vms_on_node

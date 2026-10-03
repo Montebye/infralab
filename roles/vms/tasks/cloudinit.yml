@@ -1,26 +1,29 @@
 ---
 - name: Generate user-data file
-  template:
+  ansible.builtin.template:
     src: "user-data.j2"
     dest: "{{ item['disk']['path'] }}/{{ item['name'] }}-user-data"
+    mode: '0600'
   when:
     - item['name'] not in __vms_on_node
     - item['state'] is defined and item['state'] == "present"
   loop: "{{ vms }}"
 
 - name: Generate network-config file
-  template:
+  ansible.builtin.template:
     src: "network-config.j2"
     dest: "{{ item['disk']['path'] }}/{{ item['name'] }}-network-config"
+    mode: '0600'
   when:
     - item['name'] not in __vms_on_node
     - item['state'] is defined and item['state'] == "present"
   loop: "{{ vms }}"
 
 - name: Generate meta-data file
-  template:
+  ansible.builtin.template:
     src: "meta-data.j2"
     dest: "{{ item['disk']['path'] }}/{{ item['name'] }}-meta-data"
+    mode: '0600'
   when:
     - item['name'] not in __vms_on_node
     - item['state'] is defined and item['state'] == "present"

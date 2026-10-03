@@ -1,0 +1,19 @@
+---
+- name: Validate the executor-only managed contract
+  ansible.builtin.assert:
+    that:
+      - vms_libvirt_uri == 'qemu:///system'
+      - vms | length == 1
+      - vms[0].uuid is match('^[0-9a-f-]{36}$')
+      - vms[0].name is match('^ss-[0-9]+-[a-z0-9-]+$')
+      - vms[0].directory == '/var/lib/libvirt/images/selfservice/' ~ vms[0].uuid
+      - vms[0].state in ['present', 'absent']
+    fail_msg: Managed VM requires a validated executor specification
+
+- name: Create a managed VM
+  ansible.builtin.include_tasks: managed_present.yml
+  when: vms[0].state == 'present'
+
+- name: Delete a managed VM
+  ansible.builtin.include_tasks: managed_absent.yml
+  when: vms[0].state == 'absent'

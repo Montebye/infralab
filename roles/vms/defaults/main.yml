@@ -1,1 +1,3 @@
 ---
+vms_managed_mode: false
+vms_libvirt_uri: qemu:///system

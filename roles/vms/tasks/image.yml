@@ -1,10 +1,10 @@
 ---
 - name: Check if source image exists
-  stat:
+  ansible.builtin.stat:
     path: "{{ vms_image }}"
   register: __vms_image
 
 - name: Fail if source image does not exist
-  fail:
+  ansible.builtin.fail:
     msg: "Source image not found at {{ vms_image }}"
   when: not __vms_image.stat.exists
