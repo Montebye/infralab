@@ -1,0 +1,131 @@
+---
+- name: Require the supported platform and explicit activation evidence
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == 'Rocky'
+      - ansible_distribution_major_version == '9'
+      - ansible_selinux.status == 'enabled'
+      - ansible_selinux.mode == 'enforcing'
+      - not lab_selfservice_enabled or lab_selfservice_install
+      - not lab_selfservice_enabled or lab_selfservice_disk_budget_confirmed
+      - not lab_selfservice_enabled or lab_selfservice_management_protection_confirmed
+      - not lab_selfservice_enabled or lab_selfservice_access_audit_confirmed
+    fail_msg: 'Rocky 9 with enforcing SELinux and verified disk, management and access evidence required'
+
+- name: Calculate deployment intent including enforcement variables
+  ansible.builtin.set_fact:
+    _lab_deployment_digest: >-
+      {{ vars | dict2items | selectattr('key', 'match', '^lab_selfservice_') |
+         sort(attribute='key') | list | to_json | hash('sha256') }}
+
+- name: Inspect successful deployment receipt
+  ansible.builtin.stat:
+    path: /etc/infralab-selfservice/deployment-receipt
+  register: _lab_receipt_stat
+
+- name: Read previous successful deployment receipt
+  ansible.builtin.slurp:
+    src: /etc/infralab-selfservice/deployment-receipt
+  register: _lab_receipt
+  when: _lab_receipt_stat.stat.exists
+
+- name: Determine whether deployment intent changed
+  ansible.builtin.set_fact:
+    _lab_deployment_changed: >-
+      {{ not _lab_receipt_stat.stat.exists or
+         (_lab_receipt.content | default('') | b64decode | trim) != _lab_deployment_digest }}
+
+- name: Remove admission marker before updates or disablement
+  ansible.builtin.file:
+    path: /etc/infralab-selfservice/enabled
+    state: absent
+  when: _lab_deployment_changed or not lab_selfservice_enabled
+
+- name: Close the self-service action before updates or disablement
+  ansible.builtin.template:
+    src: access.rules.j2
+    dest: /etc/polkit-1/rules.d/50-infralab-selfservice.rules
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    lab_selfservice_gate_enabled: false
+  when: _lab_deployment_changed or not lab_selfservice_enabled
+
+- name: Inspect existing administrator entrypoint
+  ansible.builtin.stat:
+    path: /usr/local/sbin/lab-selfservice-admin
+  register: _lab_admin_stat
+
+- name: Drain existing operations and check registry before runtime changes
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/lab-selfservice-admin, check]
+  changed_when: false
+  when: _lab_admin_stat.stat.exists and not ansible_check_mode
+
+- name: Audit unchanged runtime before retaining open admission
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, -I, /opt/infralab-selfservice/deployment-check.py, runtime]
+  changed_when: false
+  when: not _lab_deployment_changed and lab_selfservice_enabled and not ansible_check_mode
+
+- name: Validate prepared host prerequisites
+  ansible.builtin.include_tasks: preflight.yml
+  when: lab_selfservice_install
+
+- name: Install trusted deployment
+  ansible.builtin.include_tasks: install.yml
+  when: lab_selfservice_install
+
+- name: Install validated administrative policy
+  ansible.builtin.include_tasks: policy.yml
+  when: lab_selfservice_install
+
+- name: Apply and check participant enforcement
+  ansible.builtin.include_tasks: enforcement.yml
+  when: lab_selfservice_install
+
+- name: Check registry compatibility without migration
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/lab-selfservice-admin, check]
+  changed_when: false
+  when: lab_selfservice_install and not ansible_check_mode
+
+- name: Audit runtime and participant access before activation
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, -I, /opt/infralab-selfservice/deployment-check.py, runtime]
+  changed_when: false
+  when: lab_selfservice_enabled and not ansible_check_mode
+
+- name: Install or verify guest management protection
+  ansible.builtin.include_tasks: network.yml
+  when: lab_selfservice_manage_network_guard or lab_selfservice_enabled
+
+- name: Record the fully checked deployment intent
+  ansible.builtin.copy:
+    content: "{{ _lab_deployment_digest }}\n"
+    dest: /etc/infralab-selfservice/deployment-receipt
+    owner: root
+    group: root
+    mode: '0600'
+  when: lab_selfservice_install and not ansible_check_mode
+
+- name: Open admission only after successful checks
+  ansible.builtin.copy:
+    content: "enabled\n"
+    dest: /etc/infralab-selfservice/enabled
+    owner: root
+    group: root
+    mode: '0644'
+  when: lab_selfservice_enabled and not ansible_check_mode
+
+- name: Enable the self-service action only after successful checks
+  ansible.builtin.template:
+    src: access.rules.j2
+    dest: /etc/polkit-1/rules.d/50-infralab-selfservice.rules
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    lab_selfservice_gate_enabled: true
+  when: lab_selfservice_enabled and not ansible_check_mode

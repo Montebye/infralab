@@ -1,0 +1,6 @@
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.infralab.selfservice.execute" &&
+        subject.isInGroup("lab-selfservice")) {
+        return polkit.Result.YES;
+    }
+});

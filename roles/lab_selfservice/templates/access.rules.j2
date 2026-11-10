@@ -1,0 +1,16 @@
+polkit.addRule(function(action, subject) {
+    if (subject.isInGroup("lab-selfservice") &&
+        (action.id == "org.libvirt.unix.manage" ||
+         action.id == "org.fedoraproject.FirewallD1.config" ||
+         action.id == "org.freedesktop.policykit.exec")) {
+        return polkit.Result.NO;
+    }
+    if (action.id == "org.infralab.selfservice.execute") {
+{% if lab_selfservice_gate_enabled | bool %}
+        if (subject.isInGroup("lab-selfservice")) {
+            return polkit.Result.YES;
+        }
+{% endif %}
+        return polkit.Result.NO;
+    }
+});

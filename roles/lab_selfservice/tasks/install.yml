@@ -1,0 +1,197 @@
+---
+- name: Require an administrator-reviewed release and policy
+  ansible.builtin.assert:
+    that:
+      - lab_selfservice_release_archive is match('^/')
+      - lab_selfservice_release_sha256 is match('^[0-9a-f]{64}$')
+      - lab_selfservice_policy is mapping
+      - lab_selfservice_policy.users is defined
+    fail_msg: 'Provide an absolute trusted controller archive, SHA256 and complete administrative policy'
+
+- name: Create private staging and runtime directories
+  ansible.builtin.file:
+    path: '{{ item.path }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '{{ item.mode }}'
+  loop:
+    - {path: /opt/infralab-selfservice, mode: '0700'}
+    - {path: /opt/infralab-labctl, mode: '0755'}
+    - {path: /opt/infralab-labctl/labctl_client, mode: '0755'}
+    - {path: /var/lib/infralab-selfservice, mode: '0700'}
+    - {path: /var/lib/infralab-selfservice/releases, mode: '0700'}
+    - {path: '/var/lib/infralab-selfservice/releases/{{ lab_selfservice_release_sha256 }}', mode: '0700'}
+    - {path: /var/lib/infralab-selfservice/jobs, mode: '0700'}
+    - {path: /var/lib/infralab-selfservice/ansible-tmp, mode: '0700'}
+    - {path: /var/lib/infralab-selfservice/ansible-remote, mode: '0700'}
+    - {path: /etc/infralab-selfservice, mode: '0755'}
+    - {path: /usr/local/libexec/infralab-selfservice, mode: '0755'}
+    - {path: /var/lib/libvirt/images/selfservice, mode: '0711'}
+    - {path: /opt/infralab-selfservice/collections/ansible_collections/sadyr0012/infralab/roles, mode: '0755'}
+
+- name: Install the public archive verifier
+  ansible.builtin.copy:
+    src: verify-release.py
+    dest: /var/lib/infralab-selfservice/verify-release.py
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Copy reviewed release into private staging
+  ansible.builtin.copy:
+    src: '{{ lab_selfservice_release_archive }}'
+    dest: /var/lib/infralab-selfservice/releases/release.tar.gz
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Verify archive digest and reject links and unsafe members
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -I
+      - /var/lib/infralab-selfservice/verify-release.py
+      - /var/lib/infralab-selfservice/releases/release.tar.gz
+      - '{{ lab_selfservice_release_sha256 }}'
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Extract the verified artifact into private staging
+  ansible.builtin.unarchive:
+    src: /var/lib/infralab-selfservice/releases/release.tar.gz
+    dest: '/var/lib/infralab-selfservice/releases/{{ lab_selfservice_release_sha256 }}'
+    remote_src: true
+    owner: root
+    group: root
+    mode: 'u=rwX,go='
+  when: not ansible_check_mode
+
+- name: Install runtime package and pinned managed collection from release
+  ansible.builtin.copy:
+    src: '/var/lib/infralab-selfservice/releases/{{ lab_selfservice_release_sha256 }}/{{ item.src }}'
+    dest: '{{ item.dest }}'
+    remote_src: true
+    owner: root
+    group: root
+    mode: 'u=rwX,go='
+  loop:
+    - {src: labctl_client, dest: /opt/infralab-selfservice/}
+    - {src: infralab_selfservice, dest: /opt/infralab-selfservice/}
+    - {src: vms, dest: /opt/infralab-selfservice/collections/ansible_collections/sadyr0012/infralab/roles/}
+    - {src: requirements.lock, dest: /opt/infralab-selfservice/requirements.lock}
+  when: not ansible_check_mode
+
+- name: Create a private Python environment with copied interpreter
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, -m, venv, --copies, /opt/infralab-selfservice/venv]
+    creates: /opt/infralab-selfservice/venv/bin/python3
+
+- name: Install the release dependency lock into private Python
+  ansible.builtin.pip:
+    requirements: /opt/infralab-selfservice/requirements.lock
+    executable: /opt/infralab-selfservice/venv/bin/pip
+    extra_args: --disable-pip-version-check
+  when: not ansible_check_mode
+
+- name: Install private deployment helpers and fixed runner
+  ansible.builtin.copy:
+    src: '/var/lib/infralab-selfservice/releases/{{ lab_selfservice_release_sha256 }}/deployment/{{ item }}'
+    dest: '/opt/infralab-selfservice/{{ item }}'
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0600'
+  loop: [runner.yml, ansible.cfg, deployment-check.py]
+  when: not ansible_check_mode
+
+- name: Install private administrator entrypoint
+  ansible.builtin.copy:
+    src: '/var/lib/infralab-selfservice/releases/{{ lab_selfservice_release_sha256 }}/deployment/admin'
+    dest: /usr/local/sbin/lab-selfservice-admin
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0700'
+  when: not ansible_check_mode
+
+- name: Install the independent public client and dependency lock
+  ansible.builtin.copy:
+    src: '/var/lib/infralab-selfservice/releases/{{ lab_selfservice_release_sha256 }}/{{ item }}'
+    dest: '/opt/infralab-labctl/{{ item }}'
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - labctl_client/__init__.py
+    - labctl_client/cli.py
+    - labctl_client/apply.py
+    - labctl_client/client_journal.py
+    - labctl_client/manifests.py
+    - labctl_client/models.py
+    - labctl_client/validation.py
+    - requirements-client.lock
+  when: not ansible_check_mode
+
+- name: Create the public client Python environment
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, -m, venv, --copies, /opt/infralab-labctl/venv]
+    creates: /opt/infralab-labctl/venv/bin/python3
+
+- name: Install only public client dependencies
+  ansible.builtin.pip:
+    requirements: /opt/infralab-labctl/requirements-client.lock
+    executable: /opt/infralab-labctl/venv/bin/pip
+    extra_args: --disable-pip-version-check
+  when: not ansible_check_mode
+
+- name: Install fixed local inventory
+  ansible.builtin.copy:
+    content: "localhost ansible_connection=local\n"
+    dest: /opt/infralab-selfservice/inventory
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install fixed executable entrypoints
+  ansible.builtin.copy:
+    src: '{{ item.src }}'
+    dest: '{{ item.dest }}'
+    owner: root
+    group: root
+    mode: '{{ item.mode }}'
+  loop:
+    - {src: privileged, dest: /usr/local/libexec/infralab-selfservice/privileged, mode: '0755'}
+    - {src: labctl, dest: /usr/local/bin/labctl, mode: '0755'}
+    - {src: add_port_forward, dest: /usr/local/bin/add_port_forward, mode: '0755'}
+    - {src: remove_port_forward, dest: /usr/local/bin/remove_port_forward, mode: '0755'}
+    - {src: show_firewall_rules, dest: /usr/local/bin/show_firewall_rules, mode: '0755'}
+
+- name: Install the narrowly scoped Polkit action
+  ansible.builtin.copy:
+    src: org.infralab.selfservice.policy
+    dest: /usr/share/polkit-1/actions/org.infralab.selfservice.policy
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Restore distribution SELinux labels without changing enforcement
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/restorecon
+      - -RF
+      - /opt/infralab-selfservice
+      - /opt/infralab-labctl
+      - /usr/local/libexec/infralab-selfservice
+      - /usr/local/sbin/lab-selfservice-admin
+      - /etc/polkit-1/rules.d/50-infralab-selfservice.rules
+  changed_when: false
+  when: not ansible_check_mode
+
+# Libvirt owns dynamic sVirt labels below the pool, including running guest disks.
+- name: Restore only the managed pool directory label
+  ansible.builtin.command:
+    argv: [/usr/sbin/restorecon, -F, /var/lib/libvirt/images/selfservice]
+  changed_when: false
+  when: not ansible_check_mode

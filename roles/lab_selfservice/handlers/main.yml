@@ -1,0 +1,9 @@
+---
+- name: Reload participant systemd configuration
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Reload participant KVM rules
+  ansible.builtin.command:
+    argv: [/usr/bin/udevadm, control, --reload-rules]
+  changed_when: true

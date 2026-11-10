@@ -1,0 +1,71 @@
+---
+- name: Require explicit participant enforcement management
+  ansible.builtin.assert:
+    that:
+      - not lab_selfservice_enabled or lab_selfservice_manage_enforcement
+    fail_msg: Activation requires tested participant CPU, memory, task and KVM restrictions
+
+- name: Configure participant restrictions
+  when: lab_selfservice_manage_enforcement
+  block:
+    - name: Refuse to restrict privileged administrator accounts
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - /opt/infralab-selfservice/deployment-check.py
+          - account
+          - '{{ item.username }}'
+          - '{{ item.uid | string }}'
+      loop: '{{ lab_selfservice_policy.users }}'
+      changed_when: false
+
+    - name: Create per-participant slice configuration directories
+      ansible.builtin.file:
+        path: '/etc/systemd/system/user-{{ item.uid }}.slice.d'
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop: '{{ lab_selfservice_policy.users }}'
+      loop_control:
+        label: '{{ item.username }}'
+
+    - name: Bound ordinary participant SSH processes
+      ansible.builtin.copy:
+        content: |
+          [Slice]
+          CPUAccounting=yes
+          MemoryAccounting=yes
+          TasksAccounting=yes
+          CPUQuota=100%
+          MemoryMax=512M
+          MemorySwapMax=0
+          TasksMax=128
+        dest: '/etc/systemd/system/user-{{ item.uid }}.slice.d/50-selfservice.conf'
+        owner: root
+        group: root
+        mode: '0644'
+      loop: '{{ lab_selfservice_policy.users }}'
+      loop_control:
+        label: '{{ item.username }}'
+      notify: Reload participant systemd configuration
+
+    - name: Make KVM permissions persistent without desktop grants
+      ansible.builtin.copy:
+        content: 'KERNEL=="kvm", GROUP="kvm", MODE="0660", TAG-="uaccess"'
+        dest: /etc/udev/rules.d/99-infralab-selfservice-kvm.rules
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reload participant KVM rules
+
+    - name: Restrict the current KVM device to administrators and QEMU
+      ansible.builtin.file:
+        path: /dev/kvm
+        owner: root
+        group: kvm
+        mode: '0660'
+
+    - name: Apply restrictions before activation checks
+      ansible.builtin.meta: flush_handlers

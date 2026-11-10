@@ -1,0 +1,80 @@
+---
+- name: Require existing virtualization and service prerequisite packages
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/rpm
+      - -q
+      - python3
+      - python3-pip
+      - python3-libs
+      - polkit
+      - acl
+      - firewalld
+      - libvirt-client
+      - virt-install
+      - qemu-img
+      - policycoreutils
+      - util-linux
+  changed_when: false
+
+- name: Require an existing dedicated managed storage mount
+  ansible.builtin.command:
+    argv: [/usr/bin/mountpoint, -q, /var/lib/libvirt/images/selfservice]
+  changed_when: false
+
+- name: Require administrator-approved image digests
+  ansible.builtin.assert:
+    that:
+      - lab_selfservice_image_sha256 is mapping
+      - lab_selfservice_policy.images is defined
+      - lab_selfservice_image_sha256.keys() | sort == lab_selfservice_policy.images | map(attribute='id') | sort
+    fail_msg: Provide lab_selfservice_image_sha256 for every policy image; prepare approved standalone images and dedicated storage before installation
+
+- name: Read approved image checksums without changing images
+  ansible.builtin.stat:
+    path: '{{ item.path }}'
+    checksum_algorithm: sha256
+  loop: '{{ lab_selfservice_policy.images }}'
+  loop_control:
+    label: '{{ item.id }}'
+  register: _lab_images
+
+- name: Reject missing or changed approved images
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg | default(false)
+      - item.stat.checksum | default('') == lab_selfservice_image_sha256[item.item.id]
+    fail_msg: 'Approved image {{ item.item.id }} is absent or differs from its reviewed SHA256; prepare it administratively'
+  loop: '{{ _lab_images.results }}'
+  loop_control:
+    label: '{{ item.item.id }}'
+
+- name: Inspect the fixed cloud-init ISO executable
+  ansible.builtin.stat:
+    path: /usr/bin/genisoimage
+    follow: true
+  register: _lab_iso_tool
+
+- name: Require the fixed cloud-init ISO executable
+  ansible.builtin.assert:
+    that:
+      - _lab_iso_tool.stat.isreg | default(false)
+      - _lab_iso_tool.stat.executable | default(false)
+    fail_msg: 'VM provisioning requires executable /usr/bin/genisoimage; install a reviewed provider before deploying self-service'
+
+- name: Inspect prepared policy bridges
+  ansible.builtin.stat:
+    path: '/sys/class/net/{{ item.bridge }}/bridge'
+  loop: '{{ lab_selfservice_policy.networks }}'
+  loop_control:
+    label: '{{ item.id }}'
+  register: _lab_bridges
+
+- name: Require real prepared bridges
+  ansible.builtin.assert:
+    that:
+      - item.stat.isdir | default(false)
+    fail_msg: 'Policy network {{ item.item.id }} requires existing Linux bridge {{ item.item.bridge }}; prepare it administratively'
+  loop: '{{ _lab_bridges.results }}'
+  loop_control:
+    label: '{{ item.item.id }}'

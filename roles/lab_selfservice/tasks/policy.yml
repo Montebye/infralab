@@ -1,0 +1,50 @@
+---
+- name: Create the dedicated authorization group
+  ansible.builtin.group:
+    name: lab-selfservice
+    system: true
+    state: present
+
+- name: Look up existing policy accounts without creating users
+  ansible.builtin.getent:
+    database: passwd
+    key: '{{ item.username }}'
+  loop: '{{ lab_selfservice_policy.users }}'
+  loop_control:
+    label: '{{ item.username }}'
+  register: _lab_policy_accounts
+
+- name: Verify bound UID before changing authorization membership
+  ansible.builtin.assert:
+    that:
+      - (item.ansible_facts.getent_passwd[item.item.username][1] | int) == (item.item.uid | int)
+      - (item.item.uid | int) > 0
+    fail_msg: 'Policy username must match an existing non-root UID'
+  loop: '{{ _lab_policy_accounts.results }}'
+  loop_control:
+    label: '{{ item.item.username }}'
+
+- name: Read the dedicated authorization group
+  ansible.builtin.getent:
+    database: group
+    key: lab-selfservice
+
+- name: Set exact enabled membership of the dedicated group
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/gpasswd
+      - -M
+      - '{{ lab_selfservice_policy.users | selectattr("enabled") | map(attribute="username") | sort | join(",") }}'
+      - lab-selfservice
+  when: >-
+    (ansible_facts.getent_group['lab-selfservice'][2].split(',') | reject('equalto', '') | sort | list) !=
+    (lab_selfservice_policy.users | selectattr('enabled') | map(attribute='username') | sort | list)
+  changed_when: true
+
+- name: Install the explicit policy without generating credentials
+  ansible.builtin.template:
+    src: policy.json.j2
+    dest: /etc/infralab-selfservice/policy.json
+    owner: root
+    group: root
+    mode: '0600'

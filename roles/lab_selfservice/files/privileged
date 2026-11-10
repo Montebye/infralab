@@ -1,0 +1,5 @@
+#!/usr/bin/python3 -I
+import sys
+sys.path.insert(0, '/opt/infralab-selfservice')
+from infralab_selfservice.privileged import main
+raise SystemExit(main())

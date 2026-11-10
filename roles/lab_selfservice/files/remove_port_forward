@@ -1,0 +1,5 @@
+#!/opt/infralab-labctl/venv/bin/python3 -I
+import sys
+sys.path.insert(0, "/opt/infralab-labctl")
+from labctl_client.cli import main
+raise SystemExit(main([*sys.argv[1:], 'port', 'remove', '--interactive']))

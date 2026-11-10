@@ -1,0 +1,12 @@
+---
+lab_selfservice_enabled: false
+lab_selfservice_install: true
+lab_selfservice_release_archive: ''
+lab_selfservice_release_sha256: ''
+lab_selfservice_policy: {}
+lab_selfservice_disk_budget_confirmed: false
+lab_selfservice_management_protection_confirmed: false
+lab_selfservice_access_audit_confirmed: false
+lab_selfservice_manage_enforcement: false
+lab_selfservice_manage_network_guard: false
+lab_selfservice_image_sha256: {}

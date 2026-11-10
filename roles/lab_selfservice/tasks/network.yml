@@ -1,0 +1,36 @@
+---
+- name: Inspect installed guest management protection
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/lab-selfservice-admin, check-network]
+  register: _lab_network_check
+  changed_when: false
+  failed_when: false
+  when: not ansible_check_mode
+
+- name: Generate filter exclusively from the installed administrator policy
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/lab-selfservice-admin, render-network]
+  register: _lab_network_xml
+  changed_when: false
+  when: lab_selfservice_manage_network_guard and not ansible_check_mode
+
+- name: Install administrator-owned network filter definition
+  ansible.builtin.copy:
+    content: '{{ _lab_network_xml.stdout }}'
+    dest: /etc/infralab-selfservice/network-filter.xml
+    owner: root
+    group: root
+    mode: '0644'
+  when: lab_selfservice_manage_network_guard and not ansible_check_mode
+
+- name: Apply only the dedicated self-service network filter
+  ansible.builtin.command:
+    argv: [/usr/bin/virsh, -c, 'qemu:///system', nwfilter-define, /etc/infralab-selfservice/network-filter.xml]
+  changed_when: true
+  when: lab_selfservice_manage_network_guard and not ansible_check_mode and _lab_network_check.rc != 0
+
+- name: Require matching installed guest protection
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/lab-selfservice-admin, check-network]
+  changed_when: false
+  when: not ansible_check_mode
