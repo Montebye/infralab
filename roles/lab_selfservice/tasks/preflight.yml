@@ -5,8 +5,9 @@
       - /usr/bin/rpm
       - -q
       - python3
-      - python3-pip
       - python3-libs
+      - python3-pyyaml
+      - python3-firewall
       - polkit
       - acl
       - firewalld
@@ -15,6 +16,7 @@
       - qemu-img
       - policycoreutils
       - util-linux
+      - systemd
   changed_when: false
 
 - name: Require an existing dedicated managed storage mount

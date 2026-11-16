@@ -12,11 +12,25 @@
       - not lab_selfservice_enabled or lab_selfservice_access_audit_confirmed
     fail_msg: 'Rocky 9 with enforcing SELinux and verified disk, management and access evidence required'
 
+# Invalid administrator input is refused before any change, admission included. The include's
+# condition is evaluated before anything inside is templated, so a disable run never renders
+# the loops over unvalidated policy users and settings.
+- name: Require valid release, policy and settings input
+  ansible.builtin.include_tasks: inputs.yml
+  when: lab_selfservice_install
+
+# The release is identified by its SHA256; where the controller keeps the archive is not intent.
+# The vars lookup resolves templated values: the digest follows what is deployed, not how the
+# inventory spells it.
 - name: Calculate deployment intent including enforcement variables
   ansible.builtin.set_fact:
     _lab_deployment_digest: >-
-      {{ vars | dict2items | selectattr('key', 'match', '^lab_selfservice_') |
-         sort(attribute='key') | list | to_json | hash('sha256') }}
+      {{ dict(_lab_intent_names | zip(query('ansible.builtin.vars', *_lab_intent_names))) |
+         to_json(sort_keys=True) | hash('sha256') }}
+  vars:
+    _lab_intent_names: >-
+      {{ query('ansible.builtin.varnames', '^lab_selfservice_') |
+         reject('equalto', 'lab_selfservice_release_archive') | sort }}
 
 - name: Inspect successful deployment receipt
   ansible.builtin.stat:
@@ -35,11 +49,35 @@
       {{ not _lab_receipt_stat.stat.exists or
          (_lab_receipt.content | default('') | b64decode | trim) != _lab_deployment_digest }}
 
+- name: Inspect existing administrator entrypoint
+  ansible.builtin.stat:
+    path: /usr/local/sbin/lab-selfservice-admin
+  register: _lab_admin_stat
+
+# The bundled installer swaps drifted trees; that happens only behind a closed gate (spec 11).
+# Any non-zero exit counts as unverified, including a usage error of an older administrator
+# command without verify-install.
+- name: Verify the unchanged installation before retaining open admission
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/lab-selfservice-admin, verify-install]
+  register: _lab_unchanged_install
+  changed_when: false
+  failed_when: false
+  when: >-
+    not _lab_deployment_changed and lab_selfservice_enabled and _lab_admin_stat.stat.exists and
+    not ansible_check_mode
+
+- name: Decide whether admission closes
+  ansible.builtin.set_fact:
+    _lab_close_admission: >-
+      {{ _lab_deployment_changed or not lab_selfservice_enabled or not _lab_admin_stat.stat.exists or
+         (_lab_unchanged_install.rc | default(0)) != 0 }}
+
 - name: Remove admission marker before updates or disablement
   ansible.builtin.file:
     path: /etc/infralab-selfservice/enabled
     state: absent
-  when: _lab_deployment_changed or not lab_selfservice_enabled
+  when: _lab_close_admission | bool
 
 - name: Close the self-service action before updates or disablement
   ansible.builtin.template:
@@ -50,12 +88,7 @@
     mode: '0644'
   vars:
     lab_selfservice_gate_enabled: false
-  when: _lab_deployment_changed or not lab_selfservice_enabled
-
-- name: Inspect existing administrator entrypoint
-  ansible.builtin.stat:
-    path: /usr/local/sbin/lab-selfservice-admin
-  register: _lab_admin_stat
+  when: _lab_close_admission | bool
 
 - name: Drain existing operations and check registry before runtime changes
   ansible.builtin.command:
@@ -65,9 +98,9 @@
 
 - name: Audit unchanged runtime before retaining open admission
   ansible.builtin.command:
-    argv: [/usr/bin/python3, -I, /opt/infralab-selfservice/deployment-check.py, runtime]
+    argv: [/usr/local/sbin/lab-selfservice-admin, audit, --deployment]
   changed_when: false
-  when: not _lab_deployment_changed and lab_selfservice_enabled and not ansible_check_mode
+  when: not _lab_close_admission | bool and not ansible_check_mode
 
 - name: Validate prepared host prerequisites
   ansible.builtin.include_tasks: preflight.yml
@@ -75,6 +108,16 @@
 
 - name: Install trusted deployment
   ansible.builtin.include_tasks: install.yml
+  when: lab_selfservice_install
+
+# Every lab-selfservice-admin command reads the settings, enforcement's account check included.
+- name: Install administrator settings before the next administrator command
+  ansible.builtin.template:
+    src: settings.json.j2
+    dest: /etc/infralab-selfservice/settings.json
+    owner: root
+    group: root
+    mode: '0600'
   when: lab_selfservice_install
 
 - name: Install validated administrative policy
@@ -91,9 +134,16 @@
   changed_when: false
   when: lab_selfservice_install and not ansible_check_mode
 
+# The runtime audit accepts unlisted files left in the trees; only the manifest comparison does not.
+- name: Require the installed release to equal its manifest
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/lab-selfservice-admin, verify-install]
+  changed_when: false
+  when: lab_selfservice_install and not ansible_check_mode
+
 - name: Audit runtime and participant access before activation
   ansible.builtin.command:
-    argv: [/usr/bin/python3, -I, /opt/infralab-selfservice/deployment-check.py, runtime]
+    argv: [/usr/local/sbin/lab-selfservice-admin, audit, --deployment]
   changed_when: false
   when: lab_selfservice_enabled and not ansible_check_mode
 

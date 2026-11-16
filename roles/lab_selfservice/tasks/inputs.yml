@@ -1,0 +1,55 @@
+---
+- name: Require an administrator-reviewed release, policy and settings
+  ansible.builtin.assert:
+    that:
+      - lab_selfservice_release_archive is match('^/')
+      - lab_selfservice_release_sha256 is match('^[0-9a-f]{64}\Z')
+      - lab_selfservice_policy is mapping
+      - lab_selfservice_policy.users is defined
+      - lab_selfservice_settings is mapping
+      - "'schema_version' not in lab_selfservice_settings"
+    fail_msg: >-
+      Provide an absolute trusted controller archive, its SHA256, the complete administrative
+      policy and settings without schema_version (the role sets it)
+
+# Usernames and UIDs become command arguments (getent, account-check) and unit paths.
+- name: Require plain policy usernames and integer UIDs
+  ansible.builtin.assert:
+    that:
+      - item.username is string
+      - item.username is match('^[a-z_][a-z0-9_-]{0,31}\Z')
+      - item.uid is integer
+    fail_msg: 'Policy user {{ item.username }} needs a lowercase username and an integer UID'
+  loop: '{{ lab_selfservice_policy.users }}'
+  loop_control:
+    label: '{{ item.username }}'
+
+# lab-selfservice-admin refuses an invalid settings.json for every command, the next run's drain
+# included, so the role refuses it before writing anything (specification section 7).
+- name: Require known settings with integer values in their ranges
+  ansible.builtin.assert:
+    that:
+      - item.key in _lab_settings_ranges
+      - item.value is integer
+      - item.value >= _lab_settings_ranges[item.key][0]
+      - item.value <= _lab_settings_ranges[item.key][1]
+    fail_msg: >-
+      Setting {{ item.key }} needs an integer in
+      {{ _lab_settings_ranges[item.key] | default('(unknown key)') }}
+  loop: '{{ lab_selfservice_settings | dict2items }}'
+  loop_control:
+    label: '{{ item.key }}'
+  vars:
+    _lab_settings_ranges:
+      command_timeout_seconds: [10, 3600]
+      provision_timeout_seconds: [60, 7200]
+      stop_timeout_seconds: [10, 900]
+      participant_cpu_quota_percent: [10, 6400]
+      participant_memory_max_mib: [128, 1048576]
+      participant_tasks_max: [16, 65536]
+      lock_wait_seconds: [1, 3600]
+      operation_retention_days: [1, 3650]
+      orphan_pending_hours: [1, 8760]
+      rate_limit_per_hour: [10, 100000]
+      console_tail_bytes: [1024, 1048576]
+      backup_keep: [1, 365]

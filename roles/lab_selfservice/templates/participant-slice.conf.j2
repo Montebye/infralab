@@ -1,0 +1,8 @@
+[Slice]
+CPUAccounting=yes
+MemoryAccounting=yes
+TasksAccounting=yes
+CPUQuota={{ lab_selfservice_settings.participant_cpu_quota_percent | default(100) }}%
+MemoryMax={{ lab_selfservice_settings.participant_memory_max_mib | default(512) }}M
+MemorySwapMax=0
+TasksMax={{ lab_selfservice_settings.participant_tasks_max | default(128) }}
