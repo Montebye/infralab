@@ -1,25 +1,48 @@
 ---
-- name: Run managed self-service operations
-  ansible.builtin.include_tasks: managed.yml
-  when: vms_managed_mode | bool
+- name: Refuse names and disk paths reserved for self-service
+  ansible.builtin.assert:
+    that:
+      - item.name is not match(vms_reserved_name_pattern)
+      - item.disk is not defined or __vms_guard_paths | select('match', __vms_guard_reserved) | list | length == 0
+    fail_msg: >-
+      VM {{ item.name }} uses a name matching {{ vms_reserved_name_pattern }} or a disk or file
+      path at or below {{ vms_reserved_disk_path }}; this name space belongs to self-service, not
+      to this role.
+    quiet: true
+  vars:
+    __vms_guard_reserved: '^{{ vms_reserved_disk_path | ansible.builtin.normpath | ansible.builtin.regex_escape }}(/|$)'
+    # disk.yml and cloudinit.yml write exactly these four files; a name with ../ can leave
+    # disk.path, and a name ending in /.. is folded only before the suffix is appended, so the
+    # directory and each written file path are checked, not the <disk.path>/<name> stem.
+    __vms_guard_paths:
+      - '{{ item.disk.path | ansible.builtin.normpath }}'
+      - "{{ (item.disk.path ~ '/' ~ item.name ~ '.qcow2') | ansible.builtin.normpath }}"
+      - "{{ (item.disk.path ~ '/' ~ item.name ~ '-user-data') | ansible.builtin.normpath }}"
+      - "{{ (item.disk.path ~ '/' ~ item.name ~ '-meta-data') | ansible.builtin.normpath }}"
+      - "{{ (item.disk.path ~ '/' ~ item.name ~ '-network-config') | ansible.builtin.normpath }}"
+  loop: '{{ vms }}'
+  loop_control:
+    label: '{{ item.name }}'
 
-- name: Run existing administrative workflow
-  when: not (vms_managed_mode | bool)
-  block:
-    - name: Get all VMS on the hypervisor
-      ansible.builtin.command:
-        argv: [/usr/bin/virsh, -c, "{{ vms_libvirt_uri }}", list, --all, --name]
-      register: __vms_virsh_list
-      changed_when: false
-    - name: Extract all VM list from virsh command output
-      ansible.builtin.set_fact:
-        __vms_on_node: "{{ __vms_virsh_list.stdout_lines | list }}"
-    - name: Validate source image before creating artifacts
-      ansible.builtin.import_tasks: image.yml
-      when: vms | selectattr("state", "defined") | selectattr("state", "equalto", "present") | rejectattr("name", "in", __vms_on_node) | list | length > 0
-    - name: Prepare administrative cloud-init
-      ansible.builtin.import_tasks: cloudinit.yml
-    - name: Prepare administrative disks
-      ansible.builtin.import_tasks: disk.yml
-    - name: Apply administrative domains
-      ansible.builtin.import_tasks: vms.yml
+- name: Get all VMS on the hypervisor
+  ansible.builtin.command:
+    argv: [/usr/bin/virsh, -c, "{{ vms_libvirt_uri }}", list, --all, --name]
+  register: __vms_virsh_list
+  changed_when: false
+
+- name: Extract all VM list from virsh command output
+  ansible.builtin.set_fact:
+    __vms_on_node: "{{ __vms_virsh_list.stdout_lines | list }}"
+
+- name: Validate source image before creating artifacts
+  ansible.builtin.import_tasks: image.yml
+  when: vms | selectattr("state", "defined") | selectattr("state", "equalto", "present") | rejectattr("name", "in", __vms_on_node) | list | length > 0
+
+- name: Prepare administrative cloud-init
+  ansible.builtin.import_tasks: cloudinit.yml
+
+- name: Prepare administrative disks
+  ansible.builtin.import_tasks: disk.yml
+
+- name: Apply administrative domains
+  ansible.builtin.import_tasks: vms.yml
