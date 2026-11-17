@@ -44,10 +44,10 @@ No input is a secret, and the role uses no `no_log`. Keep credentials out of the
 
 1. Refuses any flag that is not a real boolean. Requires Rocky 9, enforcing SELinux and, for
    activation, the install, confirmation and enforcement flags. When installing, it then
-   checks the inputs before it changes anything,
-   admission included: absolute archive path, SHA256, policy users with plain lowercase
-   usernames and integer UIDs (they become command arguments), settings (keys and ranges
-   above, no `schema_version`).
+   checks the inputs before it changes anything, admission included: absolute archive path,
+   SHA256, policy users with plain lowercase usernames, integer UIDs (they become command
+   arguments) and a real boolean `enabled`, settings (keys and ranges above, no
+   `schema_version`).
 2. Computes the deployment digest over the resolved values of every `lab_selfservice_*`
    variable except the archive path. When nothing changed and self-service stays enabled, it
    runs `lab-selfservice-admin verify-install`. When the digest differs from

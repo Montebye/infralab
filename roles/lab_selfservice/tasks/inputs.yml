@@ -12,14 +12,19 @@
       Provide an absolute trusted controller archive, its SHA256, the complete administrative
       policy and settings without schema_version (the role sets it)
 
-# Usernames and UIDs become command arguments (getent, account-check) and unit paths.
-- name: Require plain policy usernames and integer UIDs
+# Usernames and UIDs become command arguments (getent, account-check) and unit paths. policy.yml
+# selects group members by the truthiness of enabled, and the string "false" is truthy, so
+# enabled must be a real boolean (no coercion, as the service requires).
+- name: Require plain policy usernames, integer UIDs and boolean enabled
   ansible.builtin.assert:
     that:
       - item.username is string
       - item.username is match('^[a-z_][a-z0-9_-]{0,31}\Z')
       - item.uid is integer
-    fail_msg: 'Policy user {{ item.username }} needs a lowercase username and an integer UID'
+      - item.enabled is boolean
+    fail_msg: >-
+      Policy user {{ item.username }} needs a lowercase username, an integer UID and enabled as a
+      real boolean (true or false, not a string or number)
   loop: '{{ lab_selfservice_policy.users }}'
   loop_control:
     label: '{{ item.username }}'
