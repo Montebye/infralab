@@ -30,6 +30,8 @@ no payload file names, versions or launchers: everything installed below `/opt`,
   management default to `false`: `lab_selfservice_enabled`, `lab_selfservice_manage_enforcement`,
   `lab_selfservice_manage_network_guard`, `lab_selfservice_disk_budget_confirmed`,
   `lab_selfservice_management_protection_confirmed`, `lab_selfservice_access_audit_confirmed`.
+  Each must be a real boolean: the first task refuses a string, number or null before anything
+  else, so pass `-e '{"lab_selfservice_enabled": false}'` or a vars file, not `-e name=false`.
 
 Variables may be templates; the deployment digest is computed from their resolved values. A
 setting's value must still render as an integer: a literal integer, a bare reference to an
@@ -40,8 +42,9 @@ No input is a secret, and the role uses no `no_log`. Keep credentials out of the
 
 ## What the role does, in order
 
-1. Requires Rocky 9, enforcing SELinux and, for activation, the install, confirmation and
-   enforcement flags. When installing, it then checks the inputs before it changes anything,
+1. Refuses any flag that is not a real boolean. Requires Rocky 9, enforcing SELinux and, for
+   activation, the install, confirmation and enforcement flags. When installing, it then
+   checks the inputs before it changes anything,
    admission included: absolute archive path, SHA256, policy users with plain lowercase
    usernames and integer UIDs (they become command arguments), settings (keys and ranges
    above, no `schema_version`).

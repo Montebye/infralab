@@ -1,4 +1,23 @@
 ---
+# `-e name=false` passes the string "false", which is truthy in an expression and in a bare `when`
+# (ansible-core 2.15). No coercion, so a flag means the same everywhere; the vars lookup resolves
+# templated values.
+- name: Require real booleans for every flag
+  ansible.builtin.assert:
+    that: lookup('ansible.builtin.vars', item) is boolean
+    fail_msg: >-
+      {{ item }} is {{ lookup('ansible.builtin.vars', item) | type_debug }}, not a boolean. Pass
+      booleans as JSON, e.g. -e '{"lab_selfservice_enabled": false}', or in a vars file; -e
+      name=false passes a string.
+  loop:
+    - lab_selfservice_enabled
+    - lab_selfservice_install
+    - lab_selfservice_disk_budget_confirmed
+    - lab_selfservice_management_protection_confirmed
+    - lab_selfservice_access_audit_confirmed
+    - lab_selfservice_manage_enforcement
+    - lab_selfservice_manage_network_guard
+
 - name: Require the supported platform and explicit activation evidence
   ansible.builtin.assert:
     that:
