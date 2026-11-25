@@ -1,0 +1,5 @@
+---
+# Not inputs. Role vars outrank inventory and play variables, so neither can weaken the
+# self-service guard in tasks/main.yml.
+vms_reserved_name_pattern: '^ss-[0-9]+-'
+vms_reserved_disk_path: /var/lib/libvirt/images/selfservice

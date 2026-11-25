@@ -131,6 +131,14 @@
   failed_when: _lab_installer.rc != 0
   when: not ansible_check_mode
 
+# The installer reloads systemd itself when it wrote a unit; after any change the role reloads
+# as well, so the units of this release are loaded before admission can reopen. Not a handler:
+# handlers run when flushed, at the latest after the admission marker is written.
+- name: Reload systemd after the installer changed the host  # noqa: no-handler
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: _lab_installer is changed
+
 - name: Record the installed and the previously installed release
   ansible.builtin.copy:
     content: "{{ _lab_kept_releases | join('\n') }}\n"

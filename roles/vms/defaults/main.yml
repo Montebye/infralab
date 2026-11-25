@@ -1,4 +1,2 @@
 ---
 vms_libvirt_uri: qemu:///system
-vms_reserved_name_pattern: '^ss-[0-9]+-'
-vms_reserved_disk_path: /var/lib/libvirt/images/selfservice

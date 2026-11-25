@@ -20,8 +20,11 @@ Defaults (`defaults/main.yml`):
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `vms_libvirt_uri` | `qemu:///system` | libvirt connection used for every `virsh` and `virt-install` call |
-| `vms_reserved_name_pattern` | `^ss-[0-9]+-` | VM names reserved for self-service |
-| `vms_reserved_disk_path` | `/var/lib/libvirt/images/selfservice` | disk directory reserved for self-service |
+
+Not inputs (`vars/main.yml`): `vms_reserved_name_pattern` (`^ss-[0-9]+-`, VM names reserved for
+self-service) and `vms_reserved_disk_path` (`/var/lib/libvirt/images/selfservice`, the disk
+directory reserved for self-service). Role variables outrank inventory and play variables, so
+neither can weaken the guard below; extra vars outrank everything and are not supported for them.
 
 Required from the inventory or the play:
 

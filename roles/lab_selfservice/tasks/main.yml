@@ -40,16 +40,26 @@
 
 # The release is identified by its SHA256; where the controller keeps the archive is not intent.
 # The vars lookup resolves templated values: the digest follows what is deployed, not how the
-# inventory spells it.
+# inventory spells it. Intent is the documented inputs (defaults/main.yml) and nothing else,
+# whatever the prefix of another variable.
 - name: Calculate deployment intent including enforcement variables
   ansible.builtin.set_fact:
     _lab_deployment_digest: >-
       {{ dict(_lab_intent_names | zip(query('ansible.builtin.vars', *_lab_intent_names))) |
          to_json(sort_keys=True) | hash('sha256') }}
   vars:
-    _lab_intent_names: >-
-      {{ query('ansible.builtin.varnames', '^lab_selfservice_') |
-         reject('equalto', 'lab_selfservice_release_archive') | sort }}
+    _lab_intent_names:
+      - lab_selfservice_access_audit_confirmed
+      - lab_selfservice_disk_budget_confirmed
+      - lab_selfservice_enabled
+      - lab_selfservice_image_sha256
+      - lab_selfservice_install
+      - lab_selfservice_manage_enforcement
+      - lab_selfservice_manage_network_guard
+      - lab_selfservice_management_protection_confirmed
+      - lab_selfservice_policy
+      - lab_selfservice_release_sha256
+      - lab_selfservice_settings
 
 - name: Inspect successful deployment receipt
   ansible.builtin.stat:
@@ -86,11 +96,23 @@
     not _lab_deployment_changed and lab_selfservice_enabled and _lab_admin_stat.stat.exists and
     not ansible_check_mode
 
+# The deployment audit reads the installed policy and settings, so a hand-broken policy.json fails
+# it as well. An unverified installation skips it: the run below repairs that one.
+- name: Audit unchanged runtime before retaining open admission
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/lab-selfservice-admin, audit, --deployment]
+  register: _lab_unchanged_audit
+  changed_when: false
+  failed_when: false
+  when: >-
+    not _lab_deployment_changed and lab_selfservice_enabled and _lab_admin_stat.stat.exists and
+    not ansible_check_mode and _lab_unchanged_install.rc == 0
+
 - name: Decide whether admission closes
   ansible.builtin.set_fact:
     _lab_close_admission: >-
       {{ _lab_deployment_changed or not lab_selfservice_enabled or not _lab_admin_stat.stat.exists or
-         (_lab_unchanged_install.rc | default(0)) != 0 }}
+         (_lab_unchanged_install.rc | default(0)) != 0 or (_lab_unchanged_audit.rc | default(0)) != 0 }}
 
 - name: Remove admission marker before updates or disablement
   ansible.builtin.file:
@@ -106,20 +128,52 @@
     group: root
     mode: '0644'
   vars:
-    lab_selfservice_gate_enabled: false
+    _lab_gate_enabled: false
   when: _lab_close_admission | bool
 
-- name: Drain existing operations and check registry before runtime changes
-  ansible.builtin.command:
-    argv: [/usr/local/sbin/lab-selfservice-admin, check]
-  changed_when: false
+- name: Stop after closing admission for a failed audit of the unchanged runtime
+  ansible.builtin.fail:
+    msg: >-
+      lab-selfservice-admin audit --deployment failed with exit status {{ _lab_unchanged_audit.rc }}
+      on an unchanged deployment, so admission is closed: {{ _lab_unchanged_audit.stdout }}
+      {{ _lab_unchanged_audit.stderr }}
+  when: (_lab_unchanged_audit.rc | default(0)) != 0
+
+# check --wait arrived in 0.3: an earlier release drains without a bound, as it always did, and a
+# contract 1 installation holds no manifest. The manifest path is the one payload file name the
+# role knows; remove these reads once no host runs a release before 0.3.
+- name: Inspect the manifest of the installed release
+  ansible.builtin.stat:
+    path: /opt/infralab-selfservice/release-manifest.json
+  register: _lab_installed_manifest_stat
   when: _lab_admin_stat.stat.exists and not ansible_check_mode
 
-- name: Audit unchanged runtime before retaining open admission
+- name: Read the manifest of the installed release
+  ansible.builtin.slurp:
+    src: /opt/infralab-selfservice/release-manifest.json
+  register: _lab_installed_manifest
+  when: _lab_installed_manifest_stat.stat.exists | default(false)
+
+- name: Require the release version of the installed manifest
+  ansible.builtin.assert:
+    that: >-
+      (_lab_installed_manifest.content | b64decode | from_json).service_version | default(none)
+      is match('[0-9]+[.][0-9]+[.][0-9]+$')
+    fail_msg: >-
+      /opt/infralab-selfservice/release-manifest.json names no service_version X.Y.Z:
+      {{ (_lab_installed_manifest.content | b64decode | from_json).service_version |
+         default('none') }}
+  when: _lab_installed_manifest.content is defined
+
+# The lock wait is bounded from 0.3; any failure stops the play.
+- name: Drain existing operations and check registry before runtime changes
   ansible.builtin.command:
-    argv: [/usr/local/sbin/lab-selfservice-admin, audit, --deployment]
+    argv: >-
+      {{ ['/usr/local/sbin/lab-selfservice-admin', 'check'] + (['--wait', '300'] if
+         _lab_installed_manifest.content is defined and (_lab_installed_manifest.content |
+         b64decode | from_json).service_version is version('0.3', '>=') else []) }}
   changed_when: false
-  when: not _lab_close_admission | bool and not ansible_check_mode
+  when: _lab_admin_stat.stat.exists and not ansible_check_mode
 
 - name: Validate prepared host prerequisites
   ansible.builtin.include_tasks: preflight.yml
@@ -143,13 +197,24 @@
   ansible.builtin.include_tasks: policy.yml
   when: lab_selfservice_install
 
+# Every other command that opens the registry refuses an older schema. migrate reads the
+# installed policy like every administrator command, so on a fresh host it can run only now.
+- name: Migrate the registry to the schema of the installed release
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/lab-selfservice-admin, migrate]
+  register: _lab_migration
+  changed_when: >-
+    _lab_migration.rc == 0 and
+    (_lab_migration.stdout | from_json)['from'] != (_lab_migration.stdout | from_json)['to']
+  when: lab_selfservice_install and not ansible_check_mode
+
 - name: Apply and check participant enforcement
   ansible.builtin.include_tasks: enforcement.yml
   when: lab_selfservice_install
 
-- name: Check registry compatibility without migration
+- name: Check the migrated registry
   ansible.builtin.command:
-    argv: [/usr/local/sbin/lab-selfservice-admin, check]
+    argv: [/usr/local/sbin/lab-selfservice-admin, check, --wait, '300']
   changed_when: false
   when: lab_selfservice_install and not ansible_check_mode
 
@@ -196,5 +261,5 @@
     group: root
     mode: '0644'
   vars:
-    lab_selfservice_gate_enabled: true
+    _lab_gate_enabled: true
   when: lab_selfservice_enabled and not ansible_check_mode

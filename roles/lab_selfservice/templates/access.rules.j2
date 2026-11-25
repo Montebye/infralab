@@ -6,7 +6,7 @@ polkit.addRule(function(action, subject) {
         return polkit.Result.NO;
     }
     if (action.id == "org.infralab.selfservice.execute") {
-{% if lab_selfservice_gate_enabled | bool %}
+{% if _lab_gate_enabled | bool %}
         if (subject.isInGroup("lab-selfservice")) {
             return polkit.Result.YES;
         }
