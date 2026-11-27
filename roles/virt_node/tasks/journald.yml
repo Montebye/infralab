@@ -1,0 +1,25 @@
+---
+- name: Ensure the journald drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Keep the journal across reboots
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/60-infralab-persistent.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      # Managed by sadyr0012.infralab.virt_node: keep the journal across reboots.
+      [Journal]
+      Storage=persistent
+  notify:
+    - Restart systemd-journald
+    - Flush the runtime journal to persistent storage
+
+- name: Apply the journald change before later roles can fail
+  ansible.builtin.meta: flush_handlers

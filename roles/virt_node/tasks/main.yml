@@ -1,4 +1,8 @@
 ---
 - ansible.builtin.import_tasks: packages.yml
 - ansible.builtin.import_tasks: libvirt.yml
+- ansible.builtin.import_tasks: guests.yml
+  tags: virt_node.guests
 - ansible.builtin.import_tasks: sysctl.yml
+- ansible.builtin.import_tasks: journald.yml
+  tags: virt_node.journald

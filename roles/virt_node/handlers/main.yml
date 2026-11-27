@@ -1,0 +1,10 @@
+---
+- name: Restart systemd-journald
+  ansible.builtin.systemd_service:
+    name: systemd-journald
+    state: restarted
+
+- name: Flush the runtime journal to persistent storage
+  ansible.builtin.command:
+    argv: [journalctl, --flush]
+  changed_when: true

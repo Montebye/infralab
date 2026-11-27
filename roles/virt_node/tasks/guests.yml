@@ -1,0 +1,21 @@
+---
+- name: Configure libvirt-guests to shut guests down cleanly when the host stops
+  ansible.builtin.copy:
+    dest: /etc/sysconfig/libvirt-guests
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+    content: |
+      # Managed by sadyr0012.infralab.virt_node: shut guests down cleanly when the host stops.
+      # Domains with autostart start again at boot; libvirt-guests does not start any guest.
+      ON_BOOT=ignore
+      ON_SHUTDOWN=shutdown
+      PARALLEL_SHUTDOWN={{ virt_node_guests_parallel_shutdown }}
+      SHUTDOWN_TIMEOUT={{ virt_node_guests_shutdown_timeout }}
+
+- name: Ensure service libvirt-guests is enabled and started
+  ansible.builtin.systemd_service:
+    name: libvirt-guests
+    enabled: true
+    state: started

@@ -3,3 +3,5 @@ virt_node_packages:
   - libvirt
   - qemu-kvm
   - virt-install
+virt_node_guests_parallel_shutdown: 10
+virt_node_guests_shutdown_timeout: 300
