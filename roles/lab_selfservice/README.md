@@ -121,7 +121,9 @@ No input is a secret, and the role uses no `no_log`. Keep credentials out of the
    any of them. On a changed run admission is closed at that point, and a failing `migrate`
    leaves it closed. The next run then stops at its first `check`, which refuses the older
    schema: fix the cause, run `/usr/local/sbin/lab-selfservice-admin migrate` as root (it backs
-   up the registry first) and run the role again.
+   up the registry first) and run the role again. A failure after the installer has swapped the
+   trees and before `migrate` (the rest of step 5, or step 6: the settings and the policy) needs
+   the same manual `migrate`, because the next run's drain refuses the old schema.
 8. Enforcement: refuses privileged accounts through
    `lab-selfservice-admin account-check USER UID` before any restriction, then writes the
    participant slice drop-ins (`CPUQuota`, `MemoryMax`, `MemorySwapMax=0`, `TasksMax`) and the
